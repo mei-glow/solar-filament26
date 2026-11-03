@@ -1,0 +1,14 @@
+zip_path: ./filament-segmentation-2026.zip
+artifact_root: artifacts
+run_name: p3_r3_unetpp_b3_cldice
+manifest: artifacts/datasets/fold0_medoid_s3020/manifest.csv
+architecture: unetplusplus
+encoder: efficientnet-b3
+annotation_strategy: medoid
+crop_size: 512
+negative_fraction: 0.25
+epochs: 30
+batch: 2
+workers: 8
+skeleton_weight: 0.2
+device: "3"

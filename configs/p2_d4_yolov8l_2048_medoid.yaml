@@ -1,0 +1,16 @@
+zip_path: ./filament-segmentation-2026.zip
+artifact_root: artifacts
+run_name: p2_d4_yolov8l_2048_medoid
+data_yaml: artifacts/datasets/legacy_medoid_s3020/dataset.yaml
+imgsz: 2048
+epochs: 30
+batch: 1
+workers: 6
+device: "2"
+mosaic: 0.0
+mixup: 0.0
+translate: 0.0
+scale: 0.1
+fliplr: 0.5
+flipud: 0.5
+close_mosaic: 0

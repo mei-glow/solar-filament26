@@ -1,0 +1,10 @@
+zip_path: ./filament-segmentation-2026.zip
+artifact_root: artifacts
+run_name: p2_d2_yolov8l_2048_standard
+data_yaml: artifacts/datasets/legacy_duplicate_s3020/dataset.yaml
+imgsz: 2048
+epochs: 30
+batch: 1
+workers: 6
+device: "0"
+close_mosaic: 5

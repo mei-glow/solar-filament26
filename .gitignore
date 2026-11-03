@@ -1,0 +1,74 @@
+# Competition data and archives
+/filament-segmentation-2026/
+/filament-segmentation-2026.zip
+/MAGFiLO_1.0_Kaggle_2026/
+**/data_extracted/
+**/train_images/
+**/test_images/
+
+# Generated datasets, predictions, runs, and submissions
+/artifacts/
+/data/
+/datasets/
+/logs/
+/predictions/
+/results/
+/runs/
+/submissions/
+/yolo_dataset/
+submission*.csv
+*.metadata.json
+
+# Model weights and large ML artifacts
+*.pt
+*.pth
+*.ckpt
+*.onnx
+*.engine
+*.safetensors
+*.joblib
+*.pkl
+*.npz
+*.npy
+events.out.tfevents.*
+/wandb/
+/mlruns/
+/lightning_logs/
+
+# Kaggle/API credentials
+kaggle.json
+/.kaggle/
+
+# Python environments and caches
+.venv/
+venv/
+env/
+.conda/
+__pycache__/
+*.py[cod]
+*.so
+*.egg-info/
+.eggs/
+build/
+dist/
+.pytest_cache/
+.pytest_*/
+.coverage
+htmlcov/
+.mypy_cache/
+.ruff_cache/
+
+# Notebook, IDE, and OS files
+.ipynb_checkpoints/
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Local shell/editor files
+*.log
+*.tmp
+*.swp
+*.swo
+*~
