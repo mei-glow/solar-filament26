@@ -114,6 +114,39 @@ Promote only a branch whose pooled OOF gain holds across multiple folds. These
 are research/selection measurements, not submission CSVs. Test inference and a
 submission are built only after freezing the winning M2/M3/M4 configuration.
 
+## M2/M3 calibrated five-fold test submissions
+
+Test inference must pair detector, semantic model, and SIRA refiner from the
+same fold. Run folds 0-3 on four GPUs, then fold 4. The detector and semantic
+test caches are shared, so run M2 first and M3 second.
+
+```bash
+bash scripts/launch_sira_test_tmux.sh m2 0 1 2 3
+# after those sessions finish
+bash scripts/launch_sira_test_tmux.sh m2 4
+
+bash scripts/launch_sira_test_tmux.sh m3 0 1 2 3
+# after those sessions finish
+bash scripts/launch_sira_test_tmux.sh m3 4
+```
+
+Merge five folds only after every fold bank contains every test image. The
+default requires support from at least two folds, applies the selected M4
+quality threshold/minimum area, and retains the highest-quality mask in each
+cross-fold cluster.
+
+```bash
+bash scripts/merge_sira_submission.sh m2 2
+bash scripts/merge_sira_submission.sh m3 2
+```
+
+Outputs:
+
+```text
+${ARTIFACT_ROOT}/results/m4_m2_ensemble_s2/submission_m4_m2_ensemble_s2.csv
+${ARTIFACT_ROOT}/results/m4_m3_ensemble_s2/submission_m4_m3_ensemble_s2.csv
+```
+
 ## Monitoring
 
 ```bash
