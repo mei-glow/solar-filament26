@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import argparse
 import json
+import sys
+import time
 from collections import defaultdict
 from pathlib import Path
 
@@ -14,6 +16,7 @@ from sklearn.linear_model import LogisticRegression
 from sklearn.model_selection import GroupKFold, cross_val_predict
 from sklearn.pipeline import make_pipeline
 from sklearn.preprocessing import StandardScaler
+from tqdm import tqdm
 
 from .config import add_path_args, discover_data, paths_from_args
 from .oof_bank import OOFProposalBank
@@ -37,12 +40,23 @@ def main() -> None:
     parser.add_argument("--threshold-values", default="0.10,0.20,0.30,0.40,0.50,0.60,0.70,0.80")
     parser.add_argument("--min-area-values", default="100,200,300")
     args = parser.parse_args(); paths = paths_from_args(args); annotation_path, _, _ = discover_data(paths)
+    started = time.perf_counter()
+
+    def log(message: str) -> None:
+        elapsed = time.perf_counter() - started
+        print(f"[M4 {elapsed:8.1f}s] {message}", flush=True)
+
+    log(f"run={args.run_name} source={args.sira_run_name} model={args.model}")
+    log(f"artifact_root={paths.artifact_root}")
+    log(f"manifest={args.manifest.resolve()}")
     manifest = pd.read_csv(args.manifest.resolve())
     rows, payload_path_by_file = [], {}
     root = paths.artifact_root / "predictions" / "sira_oof" / args.sira_run_name
     for fold in range(args.folds):
         bank = OOFProposalBank(root / f"fold{fold}")
-        for path in bank.files():
+        files = bank.files()
+        log(f"loading fold={fold}: {len(files)} refined prediction files")
+        for path in tqdm(files, desc=f"Load fold {fold}", unit="file", file=sys.stdout, dynamic_ncols=True):
             payload = bank.load(path, decode_masks=False); payload_path_by_file[payload["file_name"]] = path
             for index, instance in enumerate(payload["instances"]):
                 values = instance.get("features", {})
@@ -50,21 +64,27 @@ def main() -> None:
                              **{key: float(values.get(key, 0.0)) for key in FEATURES}, "target_iou": float(values.get("target_iou", 0.0))})
     frame = pd.DataFrame(rows)
     if frame.empty: raise RuntimeError(f"No refined OOF candidates under {root}")
+    log(f"loaded {len(frame)} candidates from {len(payload_path_by_file)} physical images")
     labels = (frame["target_iou"].to_numpy() > .5).astype(int)
     if len(np.unique(labels)) < 2: raise RuntimeError("Quality labels contain only one class")
     groups = frame["file_name"].to_numpy(); splits = min(5, len(np.unique(groups)))
     estimator = _model(args.model)
+    log(f"cross-fitting quality probabilities: {splits} group folds; positives={int(labels.sum())}; negatives={int((labels == 0).sum())}")
     oof_probability = cross_val_predict(estimator, frame[FEATURES], labels, groups=groups,
                                         cv=GroupKFold(splits), method="predict_proba")[:, 1]
     frame["quality_probability"] = oof_probability
+    log("cross-fitting complete; fitting final quality model on all OOF candidates")
     estimator.fit(frame[FEATURES], labels)
+    log("final quality model fitted; loading COCO annotations")
     with annotation_path.open() as handle: coco = json.load(handle)
     images = {str(x["id"]): x for x in coco["images"]}; anns = defaultdict(list)
     for item in coco["annotations"]: anns[str(item["image_id"])].append(item)
     thresholds = [float(x) for x in args.threshold_values.split(",")]; areas = [int(x) for x in args.min_area_values.split(",")]
     stats = {(t, a): dict(iou_sum=0., pq_sum=0., count=0, tp=0, fp=0, fn=0) for t in thresholds for a in areas}
     quality_lookup = {(row.file_name, int(row.candidate_index)): float(row.quality_probability) for row in frame.itertuples(index=False)}
-    for file_name, records in manifest.groupby("file_name", sort=True):
+    grouped_manifest = list(manifest.groupby("file_name", sort=True))
+    log(f"scoring {len(thresholds) * len(areas)} configurations over {len(grouped_manifest)} physical images")
+    for file_name, records in tqdm(grouped_manifest, desc="M4 pooled-PQ sweep", unit="image", file=sys.stdout, dynamic_ncols=True):
         payload_path = payload_path_by_file.get(file_name)
         if payload_path is None: raise FileNotFoundError(f"Refined OOF bank missing {file_name}")
         payload = OOFProposalBank(payload_path.parent).load(payload_path, decode_masks=False)
@@ -94,7 +114,10 @@ def main() -> None:
     output = paths.experiment_results(args.run_name); frame.to_csv(output / "oof_quality_predictions.csv", index=False)
     ranking.to_csv(output / "quality_tuning.csv", index=False); joblib.dump({"model": estimator, "features": FEATURES}, output / "quality_model.joblib")
     (output / "best_quality.json").write_text(json.dumps(ranking.iloc[0].to_dict(), indent=2) + "\n")
-    print(ranking.head(12).to_string(index=False)); print(f"Saved calibrated model: {output / 'quality_model.joblib'}")
+    log("calibration complete")
+    print(ranking.head(12).to_string(index=False), flush=True)
+    print(f"Saved calibrated model: {output / 'quality_model.joblib'}", flush=True)
+    print(f"Saved best configuration: {output / 'best_quality.json'}", flush=True)
 
 
 if __name__ == "__main__": main()
