@@ -9,12 +9,13 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 from pycocotools import mask as mask_utils
+from scipy.optimize import linear_sum_assignment
 from tqdm import tqdm
 
 from .config import add_path_args, discover_data, paths_from_args
 from .experiment import write_json
 from .oof_bank import OOFProposalBank
-from .postprocess import mask_to_rle_object, polygon_to_rle, pq_stats_rle, resolve_instances_scored, rle_from_json
+from .postprocess import mask_to_rle_object, polygon_to_rle, resolve_instances_scored, rle_from_json
 
 
 @dataclass(frozen=True)
@@ -25,13 +26,37 @@ class Variant:
     area: float
 
 
+def _one_to_one_stats(iou: np.ndarray, prediction_count: int, gt_count: int) -> dict[str, float | int]:
+    """Cardinality-first one-to-one matching for candidate pools that may overlap.
+
+    The fast project PQ helper counts every IoU>0.5 hit, which is equivalent to
+    one-to-one matching only after predictions have been made non-overlapping.
+    Oracle pools deliberately contain overlapping alternatives, so they require
+    explicit bipartite matching to avoid counting multiple predictions for one GT.
+    """
+    if prediction_count and gt_count:
+        valid = iou > 0.5
+        # A valid edge bonus larger than any possible sum-IoU difference first
+        # maximizes match cardinality, then maximizes IoU among those matchings.
+        bonus = min(prediction_count, gt_count) + 1.0
+        rows, columns = linear_sum_assignment(-(valid.astype(np.float64) * bonus + iou))
+        accepted = valid[rows, columns]
+        tp = int(accepted.sum())
+        iou_sum = float(iou[rows[accepted], columns[accepted]].sum())
+    else:
+        tp, iou_sum = 0, 0.0
+    return {"iou_sum": iou_sum, "tp": tp, "fp": prediction_count - tp, "fn": gt_count - tp}
+
+
 def _aggregate(gt_sets: list[list[dict]], predictions: list[dict]) -> dict[str, float | int]:
     output = dict(iou_sum=0.0, tp=0, fp=0, fn=0, pq_sum=0.0, records=0)
     for gt in gt_sets:
-        values = pq_stats_rle(gt, predictions)
+        iou = mask_utils.iou(predictions, gt, [0] * len(gt)) if predictions and gt else np.zeros((len(predictions), len(gt)), np.float32)
+        values = _one_to_one_stats(iou, len(predictions), len(gt))
+        denominator = values["tp"] + 0.5 * values["fp"] + 0.5 * values["fn"]
         for key in ("iou_sum", "tp", "fp", "fn"):
             output[key] += values[key]
-        output["pq_sum"] += values["pq"]
+        output["pq_sum"] += values["iou_sum"] / denominator if denominator else 0.0
         output["records"] += 1
     denominator = output["tp"] + 0.5 * output["fp"] + 0.5 * output["fn"]
     output["pq"] = output["iou_sum"] / denominator if denominator else 0.0
@@ -116,14 +141,12 @@ def _oracle_subset(
             values = dict(iou_sum=0.0, tp=0, fp=0, fn=0, pq_sum=0.0, records=0)
             for gt, matrix in zip(gt_sets, iou_matrices):
                 selected = matrix[list(key), :] if key else np.zeros((0, len(gt)), np.float32)
-                hits = selected > 0.5
-                tp = int(hits.sum())
-                iou_sum = float(selected[hits].sum())
-                fp = int((hits.sum(axis=1) == 0).sum()) if len(key) else 0
-                fn = int((hits.sum(axis=0) == 0).sum()) if len(gt) else 0
-                denominator = tp + 0.5 * fp + 0.5 * fn
-                values["iou_sum"] += iou_sum; values["tp"] += tp; values["fp"] += fp; values["fn"] += fn
-                values["pq_sum"] += iou_sum / denominator if denominator else 0.0; values["records"] += 1
+                current = _one_to_one_stats(selected, len(key), len(gt))
+                denominator = current["tp"] + 0.5 * current["fp"] + 0.5 * current["fn"]
+                for name in ("iou_sum", "tp", "fp", "fn"):
+                    values[name] += current[name]
+                values["pq_sum"] += current["iou_sum"] / denominator if denominator else 0.0
+                values["records"] += 1
             denominator = values["tp"] + 0.5 * values["fp"] + 0.5 * values["fn"]
             values["pq"] = values["iou_sum"] / denominator if denominator else 0.0
             values["sq"] = values["iou_sum"] / values["tp"] if values["tp"] else 0.0
