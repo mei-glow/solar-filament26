@@ -50,3 +50,12 @@ def test_action_probabilities_are_clipped_and_normalized():
     output = normalize_action_predictions(np.array([[-1.0, 0.2, 0.8], [0.0, 0.0, 0.0]]))
     assert np.all(output > 0)
     assert np.allclose(output.sum(axis=1), 1.0)
+
+
+def test_graph_decoder_accepts_an_image_with_zero_candidates():
+    candidates = _candidates().iloc[0:0].assign(
+        predicted_p_reject=pd.Series(dtype=float),
+        predicted_p_raw=pd.Series(dtype=float),
+        predicted_p_refined=pd.Series(dtype=float),
+    )
+    assert decode_candidate_set(candidates, _pairs().iloc[0:0], 0.5, 0.5, 25, "edge") == []

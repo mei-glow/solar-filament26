@@ -206,7 +206,10 @@ def main() -> None:
         ).load(file_name, decode_masks=False)
         raw_rles = [rle_from_json(item["rle"]) for item in raw_payload["instances"]]
         refined_rles = [rle_from_json(item["rle"]) for item in refined_payload["instances"]]
-        current_candidates = candidate_by_file[file_name]
+        # Physical images with zero detector proposals have no row in the
+        # candidate supervision table.  They must still participate in pooled
+        # PQ so that all of their annotations are counted as false negatives.
+        current_candidates = candidate_by_file.get(file_name, candidates.iloc[0:0].copy())
         if len(raw_rles) != len(refined_rles) or len(raw_rles) != len(current_candidates):
             raise RuntimeError(f"Candidate alignment mismatch for {file_name}")
         gt_sets, raw_matrices, refined_matrices = [], [], []
