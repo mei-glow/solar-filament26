@@ -237,3 +237,52 @@ def decode_candidate_set(
         if root not in seen_roots:
             selected.append(item); seen_roots.add(root)
     return selected
+
+
+def decode_cluster_first(
+    candidates: pd.DataFrame,
+    pairs: pd.DataFrame,
+    quality_threshold: float,
+    duplicate_threshold: float,
+    min_area: int,
+) -> list[dict[str, float | int | str]]:
+    """Cluster duplicates first, then rank and threshold one representative per component."""
+    items = []
+    for row in candidates.itertuples(index=False):
+        available = []
+        if float(row.raw_area) >= min_area:
+            available.append(("raw", float(row.predicted_raw_paired_iou)))
+        if float(row.refined_area) >= min_area:
+            available.append(("refined", float(row.predicted_refined_paired_iou)))
+        if not available:
+            continue
+        action, quality = max(available, key=lambda value: value[1])
+        items.append({
+            "candidate_index": int(row.candidate_index),
+            "action": action,
+            "quality_score": quality,
+            "detector_score": float(row.detector_score),
+        })
+    if not items:
+        return []
+
+    eligible = {int(item["candidate_index"]) for item in items}
+    union = _UnionFind(sorted(eligible))
+    for row in pairs.itertuples(index=False):
+        left, right = int(row.left_candidate_index), int(row.right_candidate_index)
+        if left in eligible and right in eligible and float(row.predicted_duplicate_probability) >= duplicate_threshold:
+            union.union(left, right)
+
+    # Ranking happens inside the component before its best representative is
+    # accepted/rejected.  This prevents a weak duplicate from being thresholded
+    # before a stronger representative of the same predicted filament is seen.
+    representatives: dict[int, dict] = {}
+    for item in items:
+        root = union.find(int(item["candidate_index"]))
+        previous = representatives.get(root)
+        key = (item["quality_score"], item["detector_score"])
+        if previous is None or key > (previous["quality_score"], previous["detector_score"]):
+            representatives[root] = item
+    selected = [item for item in representatives.values() if item["quality_score"] >= quality_threshold]
+    selected.sort(key=lambda item: (item["quality_score"], item["detector_score"]), reverse=True)
+    return selected

@@ -1,7 +1,12 @@
 import numpy as np
 import pandas as pd
 
-from filament.p5_selector import add_candidate_context, decode_candidate_set, normalize_action_predictions
+from filament.p5_selector import (
+    add_candidate_context,
+    decode_candidate_set,
+    decode_cluster_first,
+    normalize_action_predictions,
+)
 
 
 def _candidates() -> pd.DataFrame:
@@ -59,3 +64,13 @@ def test_graph_decoder_accepts_an_image_with_zero_candidates():
         predicted_p_refined=pd.Series(dtype=float),
     )
     assert decode_candidate_set(candidates, _pairs().iloc[0:0], 0.5, 0.5, 25, "edge") == []
+
+
+def test_cluster_first_ranks_before_thresholding():
+    candidates = _candidates().assign(
+        predicted_raw_paired_iou=[0.4, 0.8, 0.2],
+        predicted_refined_paired_iou=[0.3, 0.7, 0.1],
+    )
+    selected = decode_cluster_first(candidates, _pairs(), 0.5, 0.5, 25)
+    assert [item["candidate_index"] for item in selected] == [1]
+    assert selected[0]["action"] == "raw"
